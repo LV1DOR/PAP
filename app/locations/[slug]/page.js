@@ -1,8 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
-import LocationMap from '@/components/locations/LocationMap';
+import dynamic from 'next/dynamic';
 import { useParams } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/lib/supabase/client';
+
+const LocationMap = dynamic(() => import('@/components/locations/LocationMap'), { ssr: false });
 
 export default function LocationDetailPage() {
   const { slug } = useParams();
@@ -14,7 +17,10 @@ export default function LocationDetailPage() {
     async function load() {
       try {
         setLoading(true);
-        const res = await fetch(`/api/locations/${slug}`);
+        const res = await fetch(`/api/locations/${slug}`, {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' },
+        });
         if (!res.ok) throw new Error('Failed to load location');
         const json = await res.json();
         setData(json);
@@ -26,6 +32,34 @@ export default function LocationDetailPage() {
     }
     if (slug) load();
   }, [slug]);
+
+  // Separate realtime effect that depends on data being loaded
+  useEffect(() => {
+    if (!data?.location?.id) return;
+
+    const locationId = data.location.id;
+    const channel = supabase
+      .channel('location-detail-' + slug)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, (payload) => {
+        console.log('[Location Detail Realtime]', payload.eventType, 'for location', locationId, payload);
+        const changed = payload.new || payload.old;
+        if (changed && changed.location_id === locationId) {
+          // Reload data for this location
+          fetch(`/api/locations/${slug}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache' },
+          })
+            .then(res => res.json())
+            .then(json => setData(json))
+            .catch(err => console.error('Realtime reload failed:', err));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [slug, data?.location?.id]);
 
   if (loading) return <div className="p-6 text-sm text-gray-500">Loading...</div>;
   if (error) return <div className="p-6 text-red-600">{error}</div>;

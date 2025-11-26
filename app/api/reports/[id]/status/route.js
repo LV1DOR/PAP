@@ -63,6 +63,15 @@ export async function PATCH(request, { params }) {
       return NextResponse.json({ error: updErr.message }, { status: 500 });
     }
 
+    // Log status change in audit
+    const { logStatusChange } = await import('@/lib/audit');
+    await logStatusChange({
+      reportId: id,
+      userId,
+      fromStatus: currentRow.status,
+      toStatus: targetStatus,
+    });
+
     return NextResponse.json({ id: updated.id, status: updated.status });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });

@@ -1,0 +1,1 @@
+[Console]::TreatControlCAsInput = $true; Start-Sleep -Milliseconds 100; $Host.UI.RawUI.FlushInputBuffer()

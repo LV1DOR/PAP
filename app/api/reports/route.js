@@ -1,8 +1,10 @@
-'use server';
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase/client';
 import { findDuplicateReports } from '@/lib/duplicate';
 import { findNearestLocation } from '@/lib/locations';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 function parseNumber(value, defaultValue) {
   const n = Number(value);
@@ -23,7 +25,7 @@ export async function GET(request) {
 
     let query = supabase
       .from('reports')
-      .select('id,title,latitude,longitude,status,created_at', { count: 'exact' })
+      .select('id,title,latitude,longitude,status,created_at,updated_at', { count: 'exact' })
       .order('created_at', { ascending: false });
 
     if (status) query = query.eq('status', status);
@@ -58,6 +60,8 @@ export async function GET(request) {
       latitude: r.latitude,
       longitude: r.longitude,
       status: r.status,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
       thumbnail_url: null,
     }));
 
@@ -79,6 +83,12 @@ export async function GET(request) {
     return NextResponse.json({
       items,
       meta: { page, limit, total: count || 0 },
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      },
     });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
@@ -96,6 +106,7 @@ export async function POST(request) {
       longitude,
       address,
       priority = 'medium',
+      location_id,
     } = body || {};
 
     if (!title || !description || !category_id || latitude == null || longitude == null) {
@@ -125,10 +136,14 @@ export async function POST(request) {
       maxHours: 24,
     });
 
-    // Attempt to auto assign nearest location (within 25km) for geo grouping
+    // Determine location: use provided location_id if valid; otherwise auto-assign nearest (within 25km)
     let locationId = null;
-    const nearest = await findNearestLocation(parseNumber(latitude, null), parseNumber(longitude, null));
-    if (nearest) locationId = nearest.id;
+    if (location_id) {
+      locationId = parseNumber(location_id, null);
+    } else {
+      const nearest = await findNearestLocation(parseNumber(latitude, null), parseNumber(longitude, null));
+      if (nearest) locationId = nearest.id;
+    }
 
     const insertObj = {
       user_id: userId,
@@ -153,6 +168,14 @@ export async function POST(request) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    // Log report creation in audit
+    const { logReportCreated } = await import('@/lib/audit');
+    await logReportCreated({
+      reportId: data.id,
+      userId,
+      title,
+    });
 
     return NextResponse.json({
       id: data.id,

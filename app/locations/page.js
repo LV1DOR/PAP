@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase/client';
 import TownCard from '@/components/locations/TownCard';
 import { useRouter } from 'next/navigation';
 
@@ -13,7 +14,10 @@ export default function LocationsIndexPage() {
     async function load() {
       try {
         setLoading(true);
-        const res = await fetch('/api/locations');
+        const res = await fetch('/api/locations', {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' },
+        });
         if (!res.ok) throw new Error('Failed to load locations');
         const json = await res.json();
         setTowns(json.locations || []);
@@ -24,6 +28,19 @@ export default function LocationsIndexPage() {
       }
     }
     load();
+
+    // Realtime: whenever reports change, refresh location stats
+    const channel = supabase
+      .channel('locations-stats')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, (payload) => {
+        console.log('[Locations Stats Realtime]', payload.eventType, payload);
+        load();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   return (

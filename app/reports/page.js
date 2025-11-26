@@ -1,5 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { useToast } from '@/components/ui/toast';
 import dynamic from 'next/dynamic';
 import { cn } from '@/lib/utils';
 
@@ -10,12 +12,16 @@ export default function ReportsPage() {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const { addToast } = useToast();
 
   useEffect(() => {
     async function load() {
       try {
         setLoading(true);
-        const res = await fetch('/api/reports?limit=100&with_images=true');
+        const res = await fetch('/api/reports?limit=1000&with_images=true', {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' },
+        });
         if (!res.ok) throw new Error('Failed to load reports');
         const json = await res.json();
         setReports(json.items || []);
@@ -26,7 +32,23 @@ export default function ReportsPage() {
       }
     }
     load();
-  }, []);
+
+    // Realtime subscription: refresh list on inserts/updates/deletes
+    const channel = supabase
+      .channel('reports-realtime-map')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, (payload) => {
+        console.log('[Reports Realtime]', payload.eventType, payload);
+        if (payload?.eventType === 'INSERT') addToast('New report created', { variant: 'success' });
+        else if (payload?.eventType === 'UPDATE') addToast('Report updated', { variant: 'default' });
+        else if (payload?.eventType === 'DELETE') addToast('Report deleted', { variant: 'error' });
+        load();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [addToast]);
 
   return (
     <div className="max-w-6xl mx-auto p-4 space-y-6">

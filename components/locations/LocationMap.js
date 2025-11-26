@@ -1,5 +1,5 @@
 'use client';
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { useMemo } from 'react';
 import { clusterReports } from '@/lib/locations';
@@ -14,16 +14,31 @@ const markerIcon = L.icon({
   shadowSize: [41, 41],
 });
 
+function FitBounds({ reports, center }) {
+  const map = useMap();
+  const points = reports.filter(r => r.latitude != null && r.longitude != null).map(r => [r.latitude, r.longitude]);
+  if (points.length > 1) {
+    const bounds = L.latLngBounds(points);
+    map.fitBounds(bounds, { padding: [20, 20] });
+  } else {
+    map.setView(center, 12);
+  }
+  return null;
+}
+
 export default function LocationMap({ location, reports }) {
   const center = [location.center_lat, location.center_lng];
-  const clusters = useMemo(() => clusterReports(reports, { gridSize: 100, timeWindowMins: 120 }), [reports]);
+  // Only show active (non-resolved/rejected) reports as live markers
+  const activeReports = useMemo(() => reports.filter(r => r.status !== 'resolved' && r.status !== 'rejected'), [reports]);
+  const clusters = useMemo(() => clusterReports(activeReports, { gridSize: 100, timeWindowMins: 120 }), [activeReports]);
 
   return (
-    <MapContainer center={center} zoom={13} style={{ height: '420px', width: '100%' }} scrollWheelZoom={false}>
+    <MapContainer center={center} zoom={12} style={{ height: '420px', width: '100%' }} scrollWheelZoom={false}>
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      <FitBounds reports={activeReports} center={center} />
       {clusters.map(cl => {
         if (cl.count === 1) {
           const r = cl.members[0];
