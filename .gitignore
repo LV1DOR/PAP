@@ -1,0 +1,22 @@
+node_modules/
+.next/
+.env*
+.DS_Store
+
+# Vercel / build
+.vercel/
+out/
+
+# Logs
+logs/
+*.log
+
+# Test coverage
+coverage/
+
+# IDE
+.vscode/
+.idea/
+
+# Supabase service key (do not commit)
+SUPABASE_SERVICE_ROLE_KEY
