@@ -10,6 +10,10 @@ export function NavBar() {
 
   useEffect(() => {
     async function fetchUserRole() {
+      if (loading) {
+        setUserRole(null);
+        return;
+      }
       if (!user) {
         setUserRole(null);
         return;
@@ -28,7 +32,11 @@ export function NavBar() {
           headers: { Authorization: `Bearer ${accessToken}` },
           cache: 'no-store',
         });
-
+        if (res.status === 401) {
+          // Not authenticated; clear role and stop logging noisy error on logout
+          setUserRole(null);
+          return;
+        }
         if (res.ok) {
           const data = await res.json();
           setUserRole(data.role);
@@ -41,7 +49,7 @@ export function NavBar() {
     }
 
     fetchUserRole();
-  }, [user]);
+  }, [user, loading]);
 
   return (
     <nav className="flex items-center justify-between mb-6 pb-4 border-b">

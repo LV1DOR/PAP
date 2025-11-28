@@ -22,6 +22,8 @@ export default function SuperAdminPage() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [inviteLink, setInviteLink] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [recoveryLink, setRecoveryLink] = useState(null);
 
   useEffect(() => {
     async function checkAccess() {
@@ -101,10 +103,64 @@ export default function SuperAdminPage() {
         const invData = await invRes.json();
         setInvitations(invData.invitations || []);
       }
+
+      // Load users for management
+      const usersRes = await fetch('/api/admin/users', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        cache: 'no-store',
+      });
+      if (usersRes.ok) {
+        const usersData = await usersRes.json();
+        setUsers(usersData.users || []);
+      }
     } catch (e) {
       console.error('Load data error:', e);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleGenerateRecovery(email) {
+    setError(null);
+    setSuccess(null);
+    setRecoveryLink(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to generate recovery link');
+      setSuccess(`Recovery link generated for ${email}`);
+      setRecoveryLink(data.recovery_url || null);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function handleSetTempPassword(userId) {
+    const temp = prompt('Enter temporary password (min 8 chars):');
+    if (!temp) return;
+    if (temp.length < 8) { alert('Password must be at least 8 characters'); return; }
+    setError(null);
+    setSuccess(null);
+    setRecoveryLink(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ userId, newPassword: temp })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to set temporary password');
+      setSuccess('Temporary password set successfully');
+    } catch (e) {
+      setError(e.message);
     }
   }
 
@@ -192,6 +248,19 @@ export default function SuperAdminPage() {
                 onClick={() => navigator.clipboard.writeText(inviteLink)}
               >
                 Copy Invite Link
+              </Button>
+            </div>
+          )}
+          {recoveryLink && (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                readOnly
+                value={recoveryLink}
+                className="flex-1 px-2 py-1 border rounded text-sm"
+              />
+              <Button type="button" onClick={() => navigator.clipboard.writeText(recoveryLink)}>
+                Copy Recovery Link
               </Button>
             </div>
           )}
@@ -355,6 +424,57 @@ export default function SuperAdminPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Users Management */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Users</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Email</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Role</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Municipality</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {users.length === 0 && (
+                  <tr>
+                    <td colSpan="6" className="px-4 py-8 text-center text-gray-500">
+                      No users found
+                    </td>
+                  </tr>
+                )}
+                {users.map((u) => (
+                  <tr key={u.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm">{u.email}</td>
+                    <td className="px-4 py-3 text-sm">{u.name || '—'}</td>
+                    <td className="px-4 py-3 text-sm">{u.role.replace('_', ' ')}</td>
+                    <td className="px-4 py-3 text-sm">{u.locations?.name || '—'}</td>
+                    <td className="px-4 py-3 text-sm">{u.status}</td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="flex gap-2">
+                        <Button type="button" onClick={() => handleGenerateRecovery(u.email)}>
+                          Generate Recovery Link
+                        </Button>
+                        <Button type="button" className="bg-orange-600 hover:bg-orange-700" onClick={() => handleSetTempPassword(u.id)}>
+                          Set Temporary Password
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

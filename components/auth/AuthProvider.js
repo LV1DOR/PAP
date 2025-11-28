@@ -41,6 +41,24 @@ export function useAuth() {
 }
 
 export async function logout() {
-  await supabase.auth.signOut();
-  window.location.href = '/';
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) console.error('[Logout] signOut error:', error);
+  } catch (e) {
+    console.error('[Logout] Unexpected error:', e);
+  } finally {
+    try {
+      // Aggressively clear Supabase auth storage to prevent stale tokens
+      const keys = Object.keys(localStorage);
+      keys.forEach((k) => {
+        if (k.startsWith('sb-') || k.includes('supabase')) {
+          try { localStorage.removeItem(k); } catch {}
+        }
+      });
+      sessionStorage.clear();
+    } catch {}
+    // Ensure client state resets and page reloads without cached session
+    window.location.href = '/';
+    setTimeout(() => window.location.reload(), 50);
+  }
 }

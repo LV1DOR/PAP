@@ -44,18 +44,75 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Invitation expired' }, { status: 400 });
     }
 
-    // Check if email already registered
+    // Check if a profile already exists for this email
     const { data: existingUser } = await serviceClient
       .from('users')
-      .select('id')
+      .select('id, email')
       .eq('email', invitation.email)
-      .single();
+      .maybeSingle();
 
+    // If a profile exists, update auth password and profile assignment
     if (existingUser) {
-      return NextResponse.json({ error: 'Account already exists' }, { status: 400 });
+      try {
+        // Ensure the auth user exists and set the chosen password
+        const listed = await serviceClient.auth.admin.listUsers();
+        const authUser = listed.data?.users?.find(
+          (u) => u.email?.toLowerCase() === invitation.email.toLowerCase()
+        );
+
+        if (!authUser) {
+          console.error('[accept-invite] Existing profile but no auth user found for email');
+          return NextResponse.json({ error: 'Account exists but cannot locate auth user' }, { status: 500 });
+        }
+
+        // Update password and confirm email for existing auth user
+        const { error: updErr } = await serviceClient.auth.admin.updateUserById(authUser.id, {
+          password,
+          email_confirm: true,
+        });
+        if (updErr) {
+          console.error('[accept-invite] Failed to update existing auth user password:', updErr);
+          return NextResponse.json({ error: 'Failed to update existing account' }, { status: 500 });
+        }
+
+        // Update profile details per invitation
+        const { error: profileErr } = await serviceClient
+          .from('users')
+          .update({
+            name: name || null,
+            role: invitation.role,
+            municipality_id: invitation.municipality_id,
+            invited_by: invitation.invited_by,
+            status: 'active',
+          })
+          .eq('id', existingUser.id);
+
+        if (profileErr) {
+          console.error('[accept-invite] Failed to update existing profile:', profileErr);
+          return NextResponse.json({ error: 'Failed to update user record' }, { status: 500 });
+        }
+
+        // Mark invitation as used
+        await serviceClient
+          .from('user_invitations')
+          .update({ used_at: new Date().toISOString() })
+          .eq('id', invitation.id);
+
+        await sendWelcomeEmail({
+          email: invitation.email,
+          name,
+          role: invitation.role,
+          municipalityName: invitation.locations?.name || 'your municipality',
+        });
+
+        return NextResponse.json({ success: true, email: invitation.email }, { status: 200 });
+      } catch (e) {
+        console.error('[accept-invite] Existing-user flow failed:', e);
+        return NextResponse.json({ error: 'Failed to complete invitation for existing user' }, { status: 500 });
+      }
     }
 
-    // Create auth user
+    // Create auth user (new account path)
     const { data: authData, error: authError } = await serviceClient.auth.admin.createUser({
       email: invitation.email,
       password,
@@ -63,6 +120,68 @@ export async function POST(request) {
     });
 
     if (authError) {
+      // If the email already exists in auth, try to attach to that account
+      if (authError.code === 'email_exists') {
+        try {
+          const listed = await serviceClient.auth.admin.listUsers();
+          const authUser = listed.data?.users?.find(
+            (u) => u.email?.toLowerCase() === invitation.email.toLowerCase()
+          );
+
+          if (!authUser) {
+            console.error('[accept-invite] email_exists but no auth user located');
+            return NextResponse.json({ error: 'Account already exists' }, { status: 400 });
+          }
+
+          const { error: updErr } = await serviceClient.auth.admin.updateUserById(authUser.id, {
+            password,
+            email_confirm: true,
+          });
+          if (updErr) {
+            console.error('[accept-invite] Failed to set password for existing auth user:', updErr);
+            return NextResponse.json({ error: 'Failed to update existing account' }, { status: 500 });
+          }
+
+          // Upsert profile for safety (in case trigger/backfill didn't create it)
+          const { error: upsertErr } = await serviceClient
+            .from('users')
+            .upsert(
+              {
+                id: authUser.id,
+                email: invitation.email,
+                name: name || null,
+                role: invitation.role,
+                municipality_id: invitation.municipality_id,
+                invited_by: invitation.invited_by,
+                status: 'active',
+              },
+              { onConflict: 'id' }
+            );
+
+          if (upsertErr) {
+            console.error('[accept-invite] Upsert existing profile failed:', upsertErr);
+            return NextResponse.json({ error: 'Failed to update user record' }, { status: 500 });
+          }
+
+          await serviceClient
+            .from('user_invitations')
+            .update({ used_at: new Date().toISOString() })
+            .eq('id', invitation.id);
+
+          await sendWelcomeEmail({
+            email: invitation.email,
+            name,
+            role: invitation.role,
+            municipalityName: invitation.locations?.name || 'your municipality',
+          });
+
+          return NextResponse.json({ success: true, email: invitation.email }, { status: 200 });
+        } catch (e) {
+          console.error('[accept-invite] email-exists recovery flow failed:', e);
+          return NextResponse.json({ error: 'Failed to complete account setup' }, { status: 500 });
+        }
+      }
+
       console.error('[accept-invite] Auth creation error:', authError);
       return NextResponse.json({ error: 'Failed to create account' }, { status: 500 });
     }

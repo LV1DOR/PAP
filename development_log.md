@@ -94,3 +94,17 @@ These fixes ensure ZERO caching—every page load and realtime event fetches fre
 **PERFORMANCE:** Batch stats query reduced per-town API calls from 4-5 to 1 total, improving `/locations` load time significantly.
 
 \n
+## 2025-11-28 - Invitations & Admin Password Tools
+**WHAT:**
+- Hardened invitation acceptance flow in `app/api/accept-invite/route.js` to gracefully handle existing emails:
+	- If a profile exists, update Supabase auth password via `auth.admin.updateUserById`, update profile fields (role, municipality, invited_by), mark invitation used.
+	- If `createUser` returns `email_exists`, locate auth user via `listUsers`, set password, upsert profile, mark invitation used.
+- Added Admin Users API `app/api/admin/users/route.js`:
+	- `GET` lists user profiles with `locations(name)`.
+	- `POST` resets passwords either by generating a recovery link (`generateLink(type: 'recovery')`) or directly setting a temporary password (`updateUserById`).
+- Extended Super Admin UI `app/admin/page.js` with a Users table and actions:
+	- Generate Recovery Link (copyable in success banner).
+	- Set Temporary Password (prompt + immediate update).
+**WHY:** Support real-world cases where emails already exist in Supabase auth or profiles were pre-created. Provide super admins with secure, fast password recovery and reset tools without email infrastructure.
+**NOTES:** All admin APIs use `getServiceClient()` and respect RLS. UI fetches use `cache: 'no-store'` to avoid stale data.
+

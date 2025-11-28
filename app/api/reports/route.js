@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import { supabase, getServiceClient } from '@/lib/supabase/client';
 import { findDuplicateReports } from '@/lib/duplicate';
 import { findNearestLocation } from '@/lib/locations';
 
@@ -23,7 +23,8 @@ export async function GET(request) {
     const lng = searchParams.get('lng');
     const radius = searchParams.get('radius'); // meters
 
-    let query = supabase
+    const client = getServiceClient();
+    let query = client
       .from('reports')
       .select('id,title,latitude,longitude,status,created_at,updated_at', { count: 'exact' })
       .order('created_at', { ascending: false });
@@ -68,7 +69,7 @@ export async function GET(request) {
     if (withImages && items.length) {
       // Fetch first image per report (N+1; acceptable for small datasets now)
       for (const report of items) {
-        const { data: imgData, error: imgError } = await supabase
+        const { data: imgData, error: imgError } = await client
           .from('report_images')
           .select('thumbnail_url')
           .eq('report_id', report.id)
@@ -119,7 +120,8 @@ export async function POST(request) {
     if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
       const token = authHeader.slice(7);
       try {
-        const { data: userData } = await supabase.auth.getUser(token);
+        const service = getServiceClient();
+        const { data: userData } = await service.auth.getUser(token);
         userId = userData?.user?.id || null;
       } catch (_) {
         userId = null;
@@ -159,7 +161,8 @@ export async function POST(request) {
       is_potential_duplicate: duplicates.length > 0,
     };
 
-    const { data, error } = await supabase
+    const service = getServiceClient();
+    const { data, error } = await service
       .from('reports')
       .insert([insertObj])
       .select('id,status,created_at')
